@@ -22,7 +22,7 @@ internal static class Program
 
         using var session = client.StartEventPipeSession(Providers, requestRundown: false);
 
-        using var eventSource = TraceLog.CreateFromEventPipeSession(session, TraceLog.EventPipeRundownConfiguration.Enable(client));
+        using var eventSource = CreateFromEventPipeSession(session, client);
 
         async Task WaitForFirstEventAsync()
         {
@@ -44,19 +44,12 @@ internal static class Program
         eventSource.Clr.MethodUnloadVerbose += (MethodLoadUnloadVerboseTraceData data) => LogIfRelevant("MethodUnloadVerbose", data.MethodNamespace, data.MethodName);
 
         // Start EventSource processing on another thread.
-        var processingTask = Task.Factory.StartNew(eventSource.Process, TaskCreationOptions.LongRunning)
-            .ContinueWith(_ =>
-            {
-                if (_.Exception?.InnerException is { } e)
-                {
-                    Console.WriteLine("Error during sampler profiler EventPipeSession processing: {0}", e);
-                }
-            }, TaskContinuationOptions.OnlyOnFaulted);
+        var processingTask = Task.Run(eventSource.Process);
 
         await WaitForFirstEventAsync().ConfigureAwait(false);
 
         // Do some work.
-        await Task.Factory.StartNew(() =>
+        await Task.Run(() =>
         {
             var sw = Stopwatch.StartNew();
             while (sw.ElapsedMilliseconds < 1000)
@@ -81,6 +74,45 @@ internal static class Program
 
         Console.WriteLine("program finished");
     }
+
+    // Copied from TraceLog.cs and modified to do the rundown here so we can log the methods.
+    public static TraceLogEventSource CreateFromEventPipeSession(EventPipeSession session, DiagnosticsClient rundownDiagnosticsClient)
+    {
+        using (var rundownSession = rundownDiagnosticsClient.StartEventPipeSession(
+            new EventPipeProvider(ClrTraceEventParser.ProviderName, EventLevel.Informational, (long)ClrTraceEventParser.Keywords.Default),
+            requestRundown: true
+        ))
+        {
+            ProcessInitialRundown(rundownSession);
+        }
+
+        return TraceLog.CreateFromEventPipeSession(session);
+    }
+
+    // Copied from TraceLog.cs
+    private static void ProcessInitialRundown(EventPipeSession session)
+    {
+        using (var source = new EventPipeEventSource(session.EventStream))
+        {
+            // SetupInitialRundownCallbacks(source);
+            var clrRundownParser = new ClrRundownTraceEventParser(source);
+            clrRundownParser.MethodDCStopVerbose += (MethodLoadUnloadVerboseTraceData data) => LogIfRelevant("MethodDCStopVerbose", data.MethodNamespace, data.MethodName);
+
+            // Only stopping the session will cause the rundown events to be sent.
+            // However, we cannot stop it before starting to process the source.
+            // Therefore, we need attach to the first event and only then stop the session.
+            var completionSource = new TaskCompletionSource<bool>();
+            source.AllEvents += delegate (TraceEvent _)
+            {
+                completionSource.TrySetResult(true);
+            };
+            var task = Task.Run(source.Process);
+            completionSource.Task.Wait();
+            session.Stop();
+            task.Wait();
+        }
+    }
+
 
     private static void LogIfRelevant(String eventName, String methodNamespace, String methodName)
     {
