@@ -9,7 +9,6 @@ using Microsoft.Diagnostics.Tracing.Parsers.Clr;
 
 internal static class Program
 {
-    // Exposed only for benchmarks.
     internal static EventPipeProvider[] Providers = new[]
     {
         new EventPipeProvider(ClrTraceEventParser.ProviderName, EventLevel.Informational, (long) ClrTraceEventParser.Keywords.Default),
