@@ -43,9 +43,8 @@ internal static class Program
         eventSource.Clr.MethodLoadVerbose += (MethodLoadUnloadVerboseTraceData data) => LogIfRelevant("MethodLoadVerbose", data.MethodNamespace, data.MethodName);
         eventSource.Clr.MethodUnloadVerbose += (MethodLoadUnloadVerboseTraceData data) => LogIfRelevant("MethodUnloadVerbose", data.MethodNamespace, data.MethodName);
 
-        // Start EventSource processing on another thread.
+        // Start EventSource processing in the background.
         var processingTask = Task.Run(eventSource.Process);
-
         await WaitForFirstEventAsync().ConfigureAwait(false);
 
         // Do some work.
