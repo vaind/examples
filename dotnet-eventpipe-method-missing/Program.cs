@@ -113,7 +113,6 @@ internal static class Program
         }
     }
 
-
     private static void LogIfRelevant(String eventName, String methodNamespace, String methodName)
     {
         if (methodNamespace.StartsWith("Program"))
